@@ -48,6 +48,12 @@ async def add(interaction:discord.Interaction,title:str,due:str): #runs interact
         return
 
     utc_dt = local_dt.astimezone(timezone.utc) #convert UTC into local
+    if utc_dt <= datetime.now(timezone.utc):
+          await interaction.response.send_message(
+            "That time is already in the past. Pick a future time.", #this checks if the user has entered a past data and rejects it automatically.
+            ephemeral=True,
+        )
+          return
     deadline_id = await database.add_deadline(
         interaction.user.id, title, utc_dt.isoformat() #stores as isotext because of no format
     ) #saves the deadline in the database and returns the id of the row that was created.
@@ -71,6 +77,36 @@ async def list_deadlines(interaction: discord.Interaction): #no input box so jus
         lines.append(f"**{deadline_id}.** {title} - <t:{ts}:F> (<t:{ts}:R>)")
 #else create an array add the deadline in a readable format and reply with it and join lines glues line together ephmeral is True to keep deadlines private.
     await interaction.response.send_message("\n".join(lines), ephemeral=True)
+
+@bot.tree.command(name="done", description="Mark a deadline as finished") #slash command for done.
+@app_commands.rename(deadline_id="id") #REUSES id in deadlines as deadline_id in the input box for the user.
+@app_commands.describe(deadline_id="The ID shown in /list") #the input box for the user
+async def done(interaction: discord.Interaction, deadline_id: int):
+    ok = await database.mark_done(deadline_id, interaction.user.id)
+    if ok:
+        await interaction.response.send_message(
+            f"Nice, deadline {deadline_id} marked as done."
+        )
+    else:
+        await interaction.response.send_message(
+            "Couldn't find an unfinished deadline with that ID. Check /list.",
+            ephemeral=True,
+        )
+#pretty self explanatory, if the deadline is found mark it as done otherwise reply with a message that it was not found.
+
+@bot.tree.command(name="delete", description="Delete a deadline")
+@app_commands.rename(deadline_id="id")
+@app_commands.describe(deadline_id="The ID shown in /list")
+async def delete(interaction: discord.Interaction, deadline_id: int):
+    ok = await database.delete_deadline(deadline_id, interaction.user.id)
+    if ok:
+        await interaction.response.send_message(f"Deleted deadline {deadline_id}.")
+    else:
+        await interaction.response.send_message(
+            "Couldn't find a deadline with that ID. Check /list.",
+            ephemeral=True,
+        )
+#holds the same format as done, if the deadline is found delete it otherwise reply with a message that it was not found.
 bot.run(TOKEN) #GO!
 #Load the token from .env
 #Create the bot with its permissions
@@ -82,3 +118,5 @@ bot.run(TOKEN) #GO!
 #We label it Pakistan time, then convert to UTC
 #We save the row and get its ID
 #We reply with a confirmation Discord formats for the viewer
+#Now update and deleted has also been added to the bot, so you can mark deadlines as done or delete them.
+#It can also check past dates and reject them, and it can also check for wrong date formats and reject them as well.

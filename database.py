@@ -30,3 +30,23 @@ async def get_deadlines(user_id):
             #fetchall pulls every match possible
         )
         return await cursor.fetchall()
+    
+async def mark_done(deadline_id, user_id):
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "UPDATE deadlines SET done = 1 " #changes row's done with deadline to 1 meaning completed.
+            "WHERE id = ? AND user_id = ? AND done = 0",
+            (deadline_id, user_id),
+        )
+        await db.commit()
+        return cursor.rowcount > 0 #if rowcount is greater than 0 it means a row was updated and returns true otherwise false
+
+
+async def delete_deadline(deadline_id, user_id):
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "DELETE FROM deadlines WHERE id = ? AND user_id = ?",
+            (deadline_id, user_id),
+        )
+        await db.commit()
+        return cursor.rowcount > 0 #if rowcount is greater than 0 it means a row was deleted and returns true otherwise false
