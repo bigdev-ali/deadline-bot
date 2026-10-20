@@ -5,7 +5,8 @@ DB_PATH="deadlines.db" #name of the database SQLite creates it if it does not ex
 async def init_db(): #initialise database
     async with aiosqlite.connect(DB_PATH) as db: #open a connect to that file
         await db.execute(""" CREATE TABLE IF NOT EXISTS deadlines ( id INTEGER PRIMARY KEY AUTOINCREMENT ,user_id INTEGER NOT NULL,
-        title TEXT NOT NULL, due_at TEXT NOT NULL, done INTEGER NOT NULL DEFAULT 0
+        title TEXT NOT NULL, due_at TEXT NOT NULL, done INTEGER NOT NULL DEFAULT 0, reminded_24h INTEGER NOT NULL DEFAULT 0, 
+        reminded_3h INTEGER NOT NULL DEFAULT 0, reminded_1h INTEGER NOT NULL DEFAULT 0
         )
         """)#db execute runs one SQL command """" just lets SQL span multiple lines then table is created as well as columns
         await db.commit() #this saves the change to the disk
