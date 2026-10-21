@@ -1,10 +1,10 @@
 import database
-from datetime import datetime,timezone #understandable
+from datetime import datetime,timezone,timedelta #understandable and timedelta is basically change in time.
 from zoneinfo import ZoneInfo #zoneifo allows you to work with timezones.
 from discord import app_commands #for slash commands with input parameters
 import os #os module used to read evs such as .env
 import discord #the discord lib
-from discord.ext import commands #grabs commands helper from the lib's extension
+from discord.ext import commands,tasks #grabs commands helper from the lib's extension and tasks is a helper for running background tasks like sending reminders.
 from dotenv import load_dotenv # grabs a function that reads your .env file
 
 load_dotenv() #READS .env file and loads DISCORD_TOKEN into the environment variables
@@ -17,8 +17,9 @@ bot=commands.Bot(command_prefix="!",intents=intents) # this creates bots with in
 LOCAL_TZ=ZoneInfo("Asia/Karachi") #this is the timezone for PAK, you can change it to your own timezone if you want.
 @bot.event #decorator says handle event
 async def setup_hook(): #runs once when bot starts
+    check_reminders.start() #starts the background task that checks for reminders every minute
     await database.init_db() #makes connection with database
-    await bot.tree.sync() #registery for all slash commands.
+    await bot.tree.sync() #registery for all slash commands
     #sync uploads list to discord,async defines a function that uses await and await is needed because syncing involves talking to discord over the internet.
 
 @bot.event
@@ -107,7 +108,46 @@ async def delete(interaction: discord.Interaction, deadline_id: int):
             ephemeral=True,
         )
 #holds the same format as done, if the deadline is found delete it otherwise reply with a message that it was not found.
+@tasks.loop(minutes=1) #this is a decorator that runs the function below every minute.
+async def check_reminders():
+    now = datetime.now(timezone.utc) #TIME NOW IN UTC
+    rows = await database.get_pending_deadlines()
+
+    for deadline_id, user_id, title, due_at, r24, r3, r1 in rows:
+        due = datetime.fromisoformat(due_at) #format the due date into a readable format
+        left = due - now #time left for the deadline to be due
+
+        if left <= timedelta(0):
+            continue  # already overdue skip it
+
+        if left <= timedelta(hours=1) and not r1:
+            stage = "1h"
+        elif left <= timedelta(hours=3) and not r3:
+            stage = "3h"
+        elif left <= timedelta(hours=24) and not r24:
+            stage = "24h"
+        else:
+            continue
+
+        ts = int(due.timestamp()) #ts represents the timestamp of the due date in seconds since epoch which is used to format the reminder message in a human-readable way.
+        try:
+            user = await bot.fetch_user(user_id)
+            await user.send(f"⏰ **{title}** is due <t:{ts}:R> (<t:{ts}:F>)")
+        except discord.Forbidden: #if user has closed DMs or blocked the bot, it will raise a discord.Forbidden exception. In that case, we catch the exception and print a message to the console indicating that we couldn't send a DM to the user.
+            print(f"Can't DM user {user_id}, their DMs are closed.")
+        except Exception as e:
+            print(f"Reminder failed for deadline {deadline_id}: {e}")
+            continue
+
+        await database.mark_reminded(deadline_id, stage)
+#switches flags only when reminder is sent here
+
+@check_reminders.before_loop
+async def before_check_reminders():
+    await bot.wait_until_ready()
+#makes sure the bot is ready before starting the loop so that we don't try to send reminders before the bot is connected to discord
 bot.run(TOKEN) #GO!
+
 #Load the token from .env
 #Create the bot with its permissions
 #Register the handlers and the /ping command
@@ -120,3 +160,4 @@ bot.run(TOKEN) #GO!
 #We reply with a confirmation Discord formats for the viewer
 #Now update and deleted has also been added to the bot, so you can mark deadlines as done or delete them.
 #It can also check past dates and reject them, and it can also check for wrong date formats and reject them as well.
+#Added a background checker as well with tasks and reminder flags 1hr,3hr and 24 hour auto DM pings

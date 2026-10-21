@@ -51,3 +51,30 @@ async def delete_deadline(deadline_id, user_id):
         )
         await db.commit()
         return cursor.rowcount > 0 #if rowcount is greater than 0 it means a row was deleted and returns true otherwise false
+
+async def get_pending_deadlines():
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT id, user_id, title, due_at, "
+            "reminded_24h, reminded_3h, reminded_1h "
+            "FROM deadlines WHERE done = 0 AND reminded_1h = 0"
+        )
+        return await cursor.fetchall() #gets all deadlines which are not done and not reminded 1h before the deadline. This is used to send reminders to users.
+
+
+FLAG_UPDATES = {
+    "24h": "reminded_24h = 1",
+    "3h": "reminded_24h = 1, reminded_3h = 1",
+    "1h": "reminded_24h = 1, reminded_3h = 1, reminded_1h = 1",
+} #this is a python dictionary that maps the reminder stage to the corresponding SQL update statement.
+
+
+async def mark_reminded(deadline_id, stage):
+    set_clause = FLAG_UPDATES[stage]
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            f"UPDATE deadlines SET {set_clause} WHERE id = ?",
+            (deadline_id,),
+        )
+        await db.commit() 
+#this updates the reminder flags for a specific deadline based on the stage of the reminder (24h, 3h, or 1h). It constructs the appropriate SQL update statement using the FLAG_UPDATES dictionary and executes it against the database.
