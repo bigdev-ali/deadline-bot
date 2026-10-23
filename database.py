@@ -1,6 +1,7 @@
 import aiosqlite
+import os
 
-DB_PATH="deadlines.db" #name of the database SQLite creates it if it does not exist
+DB_PATH=os.getenv("DB_PATH","deadlines.db") #name of the database SQLite creates it if it does not exist and so that it can be used by any host server.
 
 async def init_db(): #initialise database
     async with aiosqlite.connect(DB_PATH) as db: #open a connect to that file
