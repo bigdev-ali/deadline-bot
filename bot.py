@@ -1,4 +1,5 @@
 import database
+import logging
 from datetime import datetime,timezone,timedelta #understandable and timedelta is basically change in time.
 from zoneinfo import ZoneInfo #zoneifo allows you to work with timezones.
 from discord import app_commands #for slash commands with input parameters
@@ -8,6 +9,12 @@ from discord.ext import commands,tasks #grabs commands helper from the lib's ext
 from dotenv import load_dotenv # grabs a function that reads your .env file
 
 load_dotenv() #READS .env file and loads DISCORD_TOKEN into the environment variables
+logging.basicConfig( #creates logging once for the whole program
+    level=logging.INFO, #only show INFO nothing serious
+    format="%(asctime)s %(levelname)-8s %(name)s: %(message)s", #the format controls on each line looks on INFO -8 is space
+)
+log = logging.getLogger("deadline-bot") #creates a logger
+
 TOKEN=os.getenv("DISCORD_TOKEN") #look up dicord token and store it in a variable TOKEN
 
 intents=discord.Intents.default() # intents are permissions for what events discord sends your bot default is standard.
@@ -24,7 +31,8 @@ async def setup_hook(): #runs once when bot starts
 
 @bot.event
 async def on_ready(): #on ready when bot connected to discord.
-    print(f"Logged in as {bot.user}")
+    # in on_ready
+ log.info("Logged in as %s", bot.user) #INFO is used for a normal case and the %s is just seperate arguements used as a logging style.
 #writes in terminal your bot whatever name works.
 
 @bot.tree.command(name="ping", description="Check if the bot is alive")#slash command:name = user typing ping,description= what is shown in the menu.
@@ -69,15 +77,25 @@ async def list_deadlines(interaction: discord.Interaction): #no input box so jus
     if not rows:
         await interaction.response.send_message(
             "No upcoming deadlines. Add one with /add", ephemeral=True
-        ) #if no deadline reply with this
+        ) #if no deadline reply with this and wait
         return
 
-    lines = []
-    for deadline_id, title, due_at in rows:
+    embed = discord.Embed( 
+    title="Your upcoming deadlines", 
+    color=discord.Color.blurple(),
+    #this creates an embedded title card with color blurple which means purple and blue this will show on the bar on the left
+    )
+    for deadline_id, title, due_at in rows[:25]:#this selects the first 25 rows because discord allows 25 fields max per embed and we display rows based on urgency so it wont matter anyways
         ts = int(datetime.fromisoformat(due_at).timestamp())
-        lines.append(f"**{deadline_id}.** {title} - <t:{ts}:F> (<t:{ts}:R>)")
-#else create an array add the deadline in a readable format and reply with it and join lines glues line together ephmeral is True to keep deadlines private.
-    await interaction.response.send_message("\n".join(lines), ephemeral=True)
+        embed.add_field(
+            name=f"{deadline_id}. {title}",
+            value=f"<t:{ts}:F> (<t:{ts}:R>)",
+            inline=False, #stacks the field vertically else if True it would be side by side which would look messy
+        ) #this addes one row with a bold heading
+    embed.set_footer(text=f"{len(rows)} unfinished deadline(s)") # adds a small gray text at the bottom showing the real total
+
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+    #this is how you send the embedded version and emphemeral keeps it private
 
 @bot.tree.command(name="done", description="Mark a deadline as finished") #slash command for done.
 @app_commands.rename(deadline_id="id") #REUSES id in deadlines as deadline_id in the input box for the user.
@@ -108,6 +126,14 @@ async def delete(interaction: discord.Interaction, deadline_id: int):
             ephemeral=True,
         )
 #holds the same format as done, if the deadline is found delete it otherwise reply with a message that it was not found.
+
+STAGE_COLORS={
+    "24h":discord.Color.green(),
+    "3h":discord.Color.orange(),
+    "1h":discord.Color.red(),
+}
+#this is similar to FLAG_UPDATES the only difference is that it uses colors
+
 @tasks.loop(minutes=1) #this is a decorator that runs the function below every minute.
 async def check_reminders():
     now = datetime.now(timezone.utc) #TIME NOW IN UTC
@@ -132,11 +158,20 @@ async def check_reminders():
         ts = int(due.timestamp()) #ts represents the timestamp of the due date in seconds since epoch which is used to format the reminder message in a human-readable way.
         try:
             user = await bot.fetch_user(user_id)
-            await user.send(f"⏰ **{title}** is due <t:{ts}:R> (<t:{ts}:F>)")
+            embed = discord.Embed(
+            title="⏰ Deadline reminder",
+            description=f"**{title}**", #the bold text under the title
+            color=STAGE_COLORS[stage], #this works because stage is already set
+            )
+            embed.add_field(name="Due", value=f"<t:{ts}:F>", inline=False) #two fields and inline false you get the point
+            embed.add_field(name="Time left", value=f"<t:{ts}:R>", inline=False)
+            await user.send(embed=embed)
         except discord.Forbidden: #if user has closed DMs or blocked the bot, it will raise a discord.Forbidden exception. In that case, we catch the exception and print a message to the console indicating that we couldn't send a DM to the user.
-            print(f"Can't DM user {user_id}, their DMs are closed.")
+            # in check_reminders, the Forbidden case
+         log.warning("Can't DM user %s, their DMs are closed", user_id) # Warning means something is off
         except Exception as e:
-            print(f"Reminder failed for deadline {deadline_id}: {e}")
+           # in check_reminders, the generic exception case
+            log.error("Reminder failed for deadline %s: %s", deadline_id, e) #%s for seperate arguements and ERROR represents an extreme case as something broke
             continue
 
         await database.mark_reminded(deadline_id, stage)
@@ -146,7 +181,22 @@ async def check_reminders():
 async def before_check_reminders():
     await bot.wait_until_ready()
 #makes sure the bot is ready before starting the loop so that we don't try to send reminders before the bot is connected to discord
-bot.run(TOKEN) #GO!
+@bot.tree.error #works on error handling and runs it in one place
+async def on_app_command_error(
+    interaction: discord.Interaction, error: app_commands.AppCommandError
+): #error means the exception which was raised here
+    name = interaction.command.name if interaction.command else "unknown"
+    log.error("Error in /%s: %s", name, error, exc_info=error)
+    #logs error in command name and identifies error
+
+    msg = "Something went wrong on my end. Try again in a bit."
+    if interaction.response.is_done():
+        await interaction.followup.send(msg, ephemeral=True)
+        #if the response is done send this followup message otherwise just send the message and ephmeral is true to keep things private.
+    else:
+        await interaction.response.send_message(msg, ephemeral=True)
+
+bot.run(TOKEN, log_handler=None) #GO! log handler=none says that we designed our own log handler use that
 
 #Load the token from .env
 #Create the bot with its permissions
